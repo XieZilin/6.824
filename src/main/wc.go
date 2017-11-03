@@ -5,6 +5,7 @@ import (
 	"mapreduce"
 	"os"
 	"strings"
+	"unicode"
 )
 
 //
@@ -15,7 +16,9 @@ import (
 // of key/value pairs.
 //
 func mapF(filename string, contents string) []mapreduce.KeyValue {
-	words := strings.Fields(contents)
+	words := strings.FieldsFunc(contents, func(c rune) bool{
+		return !unicode.IsLetter(c);
+	})
 	res := make([]mapreduce.KeyValue, 1)
 	for _, w := range words {
 		kv := mapreduce.KeyValue{w, "1"}
