@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"mapreduce"
 	"os"
+	"strings"
 )
 
 //
@@ -14,7 +15,13 @@ import (
 // of key/value pairs.
 //
 func mapF(filename string, contents string) []mapreduce.KeyValue {
-	// TODO: you have to write this function
+	words := strings.Fields(contents)
+	res := make([]mapreduce.KeyValue, 1)
+	for _, w := range words {
+		kv := mapreduce.KeyValue{w, "1"}
+		res = append(res, kv)
+	}
+	return res
 }
 
 //
@@ -23,7 +30,8 @@ func mapF(filename string, contents string) []mapreduce.KeyValue {
 // any map task.
 //
 func reduceF(key string, values []string) string {
-	// TODO: you also have to write this function
+	res := fmt.Sprintf("%d", len(values))
+	return res
 }
 
 // Can be run in 3 ways:
@@ -36,7 +44,7 @@ func main() {
 	} else if os.Args[1] == "master" {
 		var mr *mapreduce.Master
 		if os.Args[2] == "sequential" {
-			mr = mapreduce.Sequential("wcseq", os.Args[3:], 3, mapF, reduceF)
+			mr = mapreduce.Sequential("wcseq", os.Args[3:], 1, mapF, reduceF)
 		} else {
 			mr = mapreduce.Distributed("wcseq", os.Args[3:], 3, os.Args[2])
 		}
