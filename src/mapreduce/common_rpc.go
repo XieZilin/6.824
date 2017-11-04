@@ -50,7 +50,9 @@ type RegisterArgs struct {
 //
 func call(srv string, rpcname string,
 	args interface{}, reply interface{}) bool {
-	c, errx := rpc.Dial("unix", srv)
+	//FOR WINDOWS
+	//c, errx := rpc.Dial("unix", srv)
+	c, errx := rpc.Dial("tcp", "127.0.0.1"+srv)
 	if errx != nil {
 		return false
 	}

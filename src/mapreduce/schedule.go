@@ -34,6 +34,7 @@ func schedule(jobName string, mapFiles []string, nReduce int, phase jobPhase, re
 		go func() {
 			defer wg.Done()
 			worker := <-registerChan
+			doArgs := DoTaskArgs{jobName, mapFiles[i]}
 			fmt.Printf("Worker: ", worker)
 			//			for {
 			//			}

@@ -119,7 +119,7 @@ func makeInputs(num int) []string {
 // Cook up a unique-ish UNIX-domain socket name
 // in /var/tmp. can't use current directory since
 // AFS doesn't support UNIX-domain sockets.
-func port(suffix string) string {
+func port(suffix int) string {
 	// FOR WINDOWS
 	/*s := "/var/tmp/824-"
 	s += strconv.Itoa(os.Getuid()) + "/"
@@ -133,7 +133,8 @@ func port(suffix string) string {
 
 func setup() *Master {
 	files := makeInputs(nMap)
-	master := port("master")
+	//master := port("master")
+	master := ":5100"
 	mr := Distributed("test", files, nReduce, master)
 	return mr
 }
@@ -164,7 +165,7 @@ func TestSequentialMany(t *testing.T) {
 func TestBasic(t *testing.T) {
 	mr := setup()
 	for i := 0; i < 2; i++ {
-		go RunWorker(mr.address, port("worker"+strconv.Itoa(i)),
+		go RunWorker(mr.address, port(i),
 			MapFunc, ReduceFunc, -1)
 	}
 	mr.Wait()
@@ -176,9 +177,9 @@ func TestBasic(t *testing.T) {
 func TestOneFailure(t *testing.T) {
 	mr := setup()
 	// Start 2 workers that fail after 10 tasks
-	go RunWorker(mr.address, port("worker"+strconv.Itoa(0)),
+	go RunWorker(mr.address, port(0),
 		MapFunc, ReduceFunc, 10)
-	go RunWorker(mr.address, port("worker"+strconv.Itoa(1)),
+	go RunWorker(mr.address, port(1),
 		MapFunc, ReduceFunc, -1)
 	mr.Wait()
 	check(t, mr.files)
@@ -198,10 +199,10 @@ func TestManyFailures(t *testing.T) {
 			break
 		default:
 			// Start 2 workers each sec. The workers fail after 10 tasks
-			w := port("worker" + strconv.Itoa(i))
+			w := port(i)
 			go RunWorker(mr.address, w, MapFunc, ReduceFunc, 10)
 			i++
-			w = port("worker" + strconv.Itoa(i))
+			w = port(i)
 			go RunWorker(mr.address, w, MapFunc, ReduceFunc, 10)
 			i++
 			time.Sleep(1 * time.Second)
