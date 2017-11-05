@@ -28,27 +28,31 @@ func schedule(jobName string, mapFiles []string, nReduce int, phase jobPhase, re
 
 	fmt.Printf("Schedule: %v %v tasks (%d I/Os)\n", ntasks, phase, n_other)
 
-	wg := sync.WaitGroup{}
+	var wg sync.WaitGroup
 	for i := 0; i < ntasks; i++ {
 		wg.Add(1)
-		go func() {
+		go func(registerChan chan string, jobName string, mapFiles []string, phase jobPhase, i int) {
+			defer fmt.Println("Wait group: ", wg)
 			defer wg.Done()
-			worker := <-registerChan
-			doArgs := DoTaskArgs{jobName, mapFiles[i]}
-			fmt.Printf("Worker: ", worker)
-			//			for {
-			//			}
+			for {
+				worker := <-registerChan
+				fmt.Printf("llll: %d %d \n", len(mapFiles), i)
+				doArgs := DoTaskArgs{jobName, mapFiles[i], phase, i, n_other}
+				res := call(worker, "Worker.DoTask", doArgs, new(struct{}))
+				if res {
+					// deadlock if not use go routine, sends do not complete
+					// until there is a receiver to accept the value
+					go func(registerChan chan string){registerChan <- worker}(registerChan)
+					break
+				} else {
+					fmt.Printf("worker: %s in jobname: %s error", worker, jobName)
+				}
 
-		}()
+			}
+
+		}(registerChan, jobName, mapFiles, phase, i)
 	}
 
-	// All ntasks tasks have to be scheduled on workers, and only once all of
-	// them have been completed successfully should the function return.
-	// Remember that workers may fail, and that any given worker may finish
-	// multiple tasks.
-	//
-	// TODO TODO TODO TODO TODO TODO TODO TODO TODO TODO TODO TODO TODO
-	//
 	wg.Wait()
 	fmt.Printf("Schedule: %v phase done\n", phase)
 }
