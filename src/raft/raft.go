@@ -24,8 +24,8 @@ import (
 	"time"
 )
 
-// import "bytes"
-// import "encoding/gob"
+import "bytes"
+import "encoding/gob"
 
 //
 // as each Raft peer becomes aware that successive log entries are
@@ -110,12 +110,13 @@ func (rf *Raft) GetState() (int, bool) {
 func (rf *Raft) persist() {
 	// Your code here (2C).
 	// Example:
-	// w := new(bytes.Buffer)
-	// e := gob.NewEncoder(w)
-	// e.Encode(rf.xxx)
-	// e.Encode(rf.yyy)
-	// data := w.Bytes()
-	// rf.persister.SaveRaftState(data)
+	w := new(bytes.Buffer)
+	e := gob.NewEncoder(w)
+	e.Encode(rf.currentTerm)
+	e.Encode(rf.votedFor)
+	e.Encode(rf.log)
+	data := w.Bytes()
+	rf.persister.SaveRaftState(data)
 }
 
 //
@@ -124,10 +125,11 @@ func (rf *Raft) persist() {
 func (rf *Raft) readPersist(data []byte) {
 	// Your code here (2C).
 	// Example:
-	// r := bytes.NewBuffer(data)
-	// d := gob.NewDecoder(r)
-	// d.Decode(&rf.xxx)
-	// d.Decode(&rf.yyy)
+	r := bytes.NewBuffer(data)
+	d := gob.NewDecoder(r)
+	d.Decode(&rf.currentTerm)
+	d.Decode(&rf.votedFor)
+	d.Decode(&rf.log)
 	if data == nil || len(data) < 1 { // bootstrap without any state?
 		return
 	}
@@ -177,6 +179,7 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 	rf.mu.Lock()
 	// returnned before unlock caused a deadlock
 	defer rf.mu.Unlock()
+	defer rf.persist()
 	DPrintf("%d vote %d in term %d", rf.me, args.CandidateId, args.Term)
 	reply.VoteGranted = false
 	if args.Term < rf.currentTerm {
@@ -222,6 +225,7 @@ func (rf *Raft) sendRequestVote(server int, args *RequestVoteArgs, reply *Reques
 			rf.currentTerm = reply.Term
 			rf.status = STATUS_FOLLOWER
 			rf.votedFor = -1
+			rf.persist()
 		}
 
 		if rf.currentTerm == reply.Term && reply.VoteGranted {
@@ -262,6 +266,7 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 	//If RPC request or response contains term T > currentTerm:
 	//set currentTerm = T, convert to follower (§5.1)
 	DPrintf("%d got append entry from  %d in term %d", rf.me, args.LeaderId, args.Term)
+	defer rf.persist()
 	// 1. Reply false if term < currentTerm (§5.1)
 	if args.Term < rf.currentTerm {
 		DPrintf("AppendEntries args term %d current term %d ", args.Term, rf.currentTerm)
@@ -311,7 +316,7 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 		} else {
 			rf.commitIndex = lastIdx
 		}
-		 rf.commitedChan <- true
+		rf.commitedChan <- true
 	}
 }
 
@@ -328,6 +333,7 @@ func (rf *Raft) sendAppendEntries(server int, args *AppendEntriesArgs, reply *Ap
 			rf.currentTerm = reply.Term
 			rf.status = STATUS_FOLLOWER
 			rf.votedFor = -1
+			rf.persist()
 			return ok
 		}
 		//If successful: update nextIndex and matchIndex for follower (§5.3)
@@ -381,7 +387,11 @@ func (rf *Raft) broadcastAppendEntries() {
 		if i != rf.me {
 			args.LeaderId = rf.me
 			args.Term = rf.currentTerm
-			args.PrevLogIndex = rf.nextIndex[i] - 1
+			if rf.nextIndex[i] >= len(rf.log) {
+				args.PrevLogIndex = len(rf.log) - 1
+			} else {
+				args.PrevLogIndex = rf.nextIndex[i] - 1
+			}
 			args.PrevLogTerm = rf.log[args.PrevLogIndex].Term
 			args.Entries = make([]LogEntry, len(rf.log)-args.PrevLogIndex-1)
 			copy(args.Entries, rf.log[args.PrevLogIndex+1:])
@@ -415,6 +425,7 @@ func (rf *Raft) Start(command interface{}) (int, int, bool) {
 	if isLeader {
 		index = len(rf.log)
 		rf.log = append(rf.log, LogEntry{Term: term, Command: command})
+		rf.persist()
 	}
 	// Your code here (2B).
 	rf.mu.Unlock()
@@ -459,6 +470,7 @@ func Make(peers []*labrpc.ClientEnd, me int,
 	rf.winChan = make(chan bool, 100)
 	rf.commitedChan = make(chan bool, 100)
 	DPrintf("rf %d, state %d", rf.me, rf.status)
+	rf.readPersist(persister.ReadRaftState())
 	go func() {
 		for {
 			switch rf.status {
@@ -479,7 +491,7 @@ func Make(peers []*labrpc.ClientEnd, me int,
 				rf.currentTerm++
 				rf.votedFor = rf.me
 				rf.voteCount = 1
-				//rf.persist()
+				rf.persist()
 				rf.mu.Unlock()
 
 				//send request vote to all peers
