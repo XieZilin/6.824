@@ -202,6 +202,7 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 		rf.log[len(rf.log)-1].Term == args.LastLogTerm {
 		reply.VoteGranted = false
 	} else if rf.votedFor == -1 || rf.votedFor == args.CandidateId {
+		rf.status = STATUS_FOLLOWER
 		rf.votedFor = args.CandidateId
 		reply.VoteGranted = true
 	} else {
@@ -266,7 +267,10 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 	//If RPC request or response contains term T > currentTerm:
 	//set currentTerm = T, convert to follower (§5.1)
 	DPrintf("%d got append entry from  %d in term %d", rf.me, args.LeaderId, args.Term)
+	rf.mu.Lock()
+	defer rf.mu.Unlock()
 	defer rf.persist()
+	reply.Success = false
 	// 1. Reply false if term < currentTerm (§5.1)
 	if args.Term < rf.currentTerm {
 		DPrintf("AppendEntries args term %d current term %d ", args.Term, rf.currentTerm)
@@ -326,6 +330,12 @@ func (rf *Raft) sendAppendEntries(server int, args *AppendEntriesArgs, reply *Ap
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
 	if ok {
+		if rf.status != STATUS_LEADER {
+			return ok
+		}
+		if args.Term != rf.currentTerm {
+			return ok
+		}
 		// host lost connection for a while
 		//If RPC request or response contains term T > currentTerm:
 		//set currentTerm = T, convert to follower (§5.1)
