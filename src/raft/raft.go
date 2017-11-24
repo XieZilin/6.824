@@ -169,9 +169,9 @@ type AppendEntriesArgs struct {
 
 type AppendEntriesReply struct {
 	// Your data here.
-	Term    int
-	Success bool
-	//NextIndex int
+	Term      int
+	Success   bool
+	NextIndex int
 }
 
 func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
@@ -271,6 +271,7 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 	defer rf.mu.Unlock()
 	defer rf.persist()
 	reply.Success = false
+	reply.NextIndex = len(rf.log)
 	// 1. Reply false if term < currentTerm (§5.1)
 	if args.Term < rf.currentTerm {
 		DPrintf("AppendEntries args term %d current term %d ", args.Term, rf.currentTerm)
@@ -288,12 +289,22 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 	//2. Reply false if log doesn’t contain an entry at prevLogIndex
 	//whose term matches prevLogTerm (§5.3)
 	DPrintf("rf.log %v args.PrevLogIndex %d", rf.log, args.PrevLogIndex)
-	if args.PrevLogIndex >= len(rf.log) || rf.log[args.PrevLogIndex].Term != args.PrevLogTerm {
+	if args.PrevLogIndex >= len(rf.log) {
 		DPrintf("AppendEntries 263")
-		reply.Success = false
-		reply.Term = rf.currentTerm
 		return
+	} else {
+		term := rf.log[args.PrevLogIndex].Term
+		if args.PrevLogTerm != term {
+			for i := args.PrevLogIndex - 1; i >= 0; i-- {
+				if rf.log[i].Term != term {
+					reply.NextIndex = i + 1;
+					break
+				}
+			}
+			return
+		}		
 	}
+	
 
 	// 3. If an existing entry conflicts with a new one (same index
 	// but different terms), delete the existing entry and all that
@@ -310,6 +321,7 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 		rf.log = rf.log[:args.PrevLogIndex+1]
 		rf.log = append(rf.log, args.Entries...)
 		reply.Term = args.Term
+		reply.NextIndex = len(rf.log)
 		reply.Success = true
 	}
 
@@ -327,6 +339,7 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 func (rf *Raft) sendAppendEntries(server int, args *AppendEntriesArgs, reply *AppendEntriesReply) bool {
 	DPrintf("server %d send append entry to %d", rf.me, server)
 	ok := rf.peers[server].Call("Raft.AppendEntries", args, reply)
+	DPrintf("server %d got append entry reply from %d : %v", rf.me, server, reply)
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
 	if ok {
@@ -357,9 +370,10 @@ func (rf *Raft) sendAppendEntries(server int, args *AppendEntriesArgs, reply *Ap
 		} else {
 			//If AppendEntries fails because of log inconsistency:
 			//decrement nextIndex and retry (§5.3)
-			if rf.nextIndex[server] > 1 {
-				rf.nextIndex[server]--
-			}
+//			if rf.nextIndex[server] > 1 {
+//				rf.nextIndex[server]--
+//			}
+			rf.nextIndex[server] = reply.NextIndex
 		}
 	} else {
 		DPrintf("Send append entry failed %v", ok)
@@ -397,11 +411,13 @@ func (rf *Raft) broadcastAppendEntries() {
 		if i != rf.me {
 			args.LeaderId = rf.me
 			args.Term = rf.currentTerm
+			DPrintf("aaa %d %d", rf.nextIndex[i], len(rf.log))
 			if rf.nextIndex[i] >= len(rf.log) {
 				args.PrevLogIndex = len(rf.log) - 1
 			} else {
 				args.PrevLogIndex = rf.nextIndex[i] - 1
 			}
+			DPrintf("rf log % v prevlog idx %d", rf.log, args.PrevLogIndex)
 			args.PrevLogTerm = rf.log[args.PrevLogIndex].Term
 			args.Entries = make([]LogEntry, len(rf.log)-args.PrevLogIndex-1)
 			copy(args.Entries, rf.log[args.PrevLogIndex+1:])
