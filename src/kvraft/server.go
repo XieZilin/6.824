@@ -7,6 +7,7 @@ import (
 	"raft"
 	"sync"
 	"time"
+	"bytes"
 )
 
 const Debug = 1
@@ -153,11 +154,22 @@ func StartKVServer(servers []*labrpc.ClientEnd, me int, persister *raft.Persiste
 	go func() {
 		for {
 			msg := <-kv.applyCh
-			if false {
+			if msg.UseSnapshot {
+				var LastIncludedIndex int
+				var LastIncludedTer int
+				r := bytes.NewBuffer(msg.Snapshot)
+				d := gob.NewDecoder(r)
+				kv.mu.Lock()
+				d.Decode(&LastIncludedIndex)
+				d.Decode(&LastIncludedTer)
+				kv.db = make(map[string]string)
+				kv.ack = make(map[int64]int)
+				d.Decode(&kv.db)
+				d.Decode(&kv.ack)
+				kv.mu.Unlock()
 			} else {
 				op := msg.Command.(Op)
 				kv.mu.Lock()
-				// do something
 				if !kv.CheckDuplicate(op.Id, op.ReqId) {
 					kv.Apply(op)
 				}
@@ -172,7 +184,14 @@ func StartKVServer(servers []*labrpc.ClientEnd, me int, persister *raft.Persiste
 					kv.result[msg.Index] = make(chan Op, 1)
 				}
 				//do something
-
+				if maxraftstate >= 0 && kv.rf.GetPersistSize() > maxraftstate {
+					w := new(bytes.Buffer)
+					e := gob.NewEncoder(w)
+					e.Encode(kv.db)
+					e.Encode(kv.ack)
+					data := w.Bytes()
+					go kv.rf.StartSnapshot(data, msg.Index)
+				}
 				kv.mu.Unlock()
 			}
 		}

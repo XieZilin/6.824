@@ -49,7 +49,7 @@ const (
 type LogEntry struct {
 	Command interface{}
 	Term    int
-	//Index   int
+	Index   int
 }
 
 //
@@ -85,6 +85,7 @@ type Raft struct {
 	// channels
 	hearBeatChan    chan bool
 	requestVoteChan chan bool
+	applyChan chan ApplyMsg
 
 	voteCount int
 	winChan   chan bool
@@ -135,6 +136,41 @@ func (rf *Raft) readPersist(data []byte) {
 	}
 }
 
+func (rf *Raft) readSnapshot(data []byte) {
+	//rf.readPersist(rf.persister.ReadRaftState())
+	if len(data) == 0 {
+		return
+	}
+	var LastIncludedIndex int
+	var LastIncludedTerm int
+	r := bytes.NewBuffer(data)
+	d := gob.NewDecoder(r)
+	d.Decode(&LastIncludedIndex)
+	d.Decode(&LastIncludedTerm)
+	rf.commitIndex = LastIncludedIndex
+	rf.lastApplied = LastIncludedIndex
+	rf.log = trancateLog(LastIncludedIndex, LastIncludedTerm, rf.log)
+	msg := ApplyMsg{UseSnapshot: true, Snapshot: data}
+	go func() {
+		rf.applyChan <- msg
+	}()
+}
+
+func truncateLog(lastIncludedIndex int, lastIncludedTerm int, log []LogEntry) []LogEntry {
+
+	var newLogEntries []LogEntry
+	newLogEntries = append(newLogEntries, LogEntry{LogIndex: lastIncludedIndex, LogTerm: lastIncludedTerm})
+
+	for index := len(log) - 1; index >= 0; index-- {
+		if log[index].LogIndex == lastIncludedIndex && log[index].LogTerm == lastIncludedTerm {
+			newLogEntries = append(newLogEntries, log[index+1:]...)
+			break
+		}
+	}
+
+	return newLogEntries
+}
+
 //
 // example RequestVote RPC arguments structure.
 // field names must start with capital letters!
@@ -172,6 +208,14 @@ type AppendEntriesReply struct {
 	Term      int
 	Success   bool
 	NextIndex int
+}
+
+func (rf *Raft) GetPersistSize() int {
+	return rf.persist().RaftStateSize()
+}
+
+func (rf *Raft) StartSnapshot(snapshot []byte, index int) {
+	return rf.persist().RaftStateSize()
 }
 
 func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
@@ -297,14 +341,13 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 		if args.PrevLogTerm != term {
 			for i := args.PrevLogIndex - 1; i >= 0; i-- {
 				if rf.log[i].Term != term {
-					reply.NextIndex = i + 1;
+					reply.NextIndex = i + 1
 					break
 				}
 			}
 			return
-		}		
+		}
 	}
-	
 
 	// 3. If an existing entry conflicts with a new one (same index
 	// but different terms), delete the existing entry and all that
@@ -370,9 +413,9 @@ func (rf *Raft) sendAppendEntries(server int, args *AppendEntriesArgs, reply *Ap
 		} else {
 			//If AppendEntries fails because of log inconsistency:
 			//decrement nextIndex and retry (§5.3)
-//			if rf.nextIndex[server] > 1 {
-//				rf.nextIndex[server]--
-//			}
+			//			if rf.nextIndex[server] > 1 {
+			//				rf.nextIndex[server]--
+			//			}
 			rf.nextIndex[server] = reply.NextIndex
 		}
 	} else {
@@ -495,8 +538,10 @@ func Make(peers []*labrpc.ClientEnd, me int,
 	rf.requestVoteChan = make(chan bool, 100)
 	rf.winChan = make(chan bool, 100)
 	rf.commitedChan = make(chan bool, 100)
+	rf.applyChan = applyCh
 	DPrintf("rf %d, state %d", rf.me, rf.status)
 	rf.readPersist(persister.ReadRaftState())
+	rf.readSnapshot(persister.ReadSnapshot())
 	go func() {
 		for {
 			switch rf.status {
